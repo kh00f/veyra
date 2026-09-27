@@ -1,0 +1,39 @@
+# ── Secrets ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── User data ────────────────────────────────────────────
+engagements/
+*.audit.jsonl
+*.findings.json
+
+# ── Node ─────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ── Build ────────────────────────────────────────────────
+dist/
+dist-electron/
+build/
+*.tsbuildinfo
+
+# ── Editors / OS ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── CVE corpus (generated, not shipped) ─────────────────
+knowledge/cve/entries/
+knowledge/cve/index.json
+knowledge/cve/.progress.json
+
+# ── Misc ─────────────────────────────────────────────────
+cve-ingest.log
+.env.backup
+.env.testing
+
+# ── Scan reports (real-target data, never commit) ──
+reports/

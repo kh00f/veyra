@@ -1,0 +1,25 @@
+{
+  "name": "veyra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VEYRA AI — Autonomous AI-Assisted Penetration Testing Platform",
+  "engines": { "node": ">=22.0.0" },
+  "bin": { "veyra": "./bin/veyra.js" },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^17.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
