@@ -9,14 +9,15 @@ import { register, type Tool } from "./registry.ts";
 import { getCve, searchCves, indexCount } from "../knowledge/cve.ts";
 
 const NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0";
-const NVD_API_KEY = process.env.NVD_API_KEY ?? "";
 
 // ── Live NVD fallback ───────────────────────────────────────
 async function fetchFromNvd(cveId: string): Promise<any | null> {
+  // Read the key here, not at module load, so a late-loaded .env still works.
+  const apiKey = process.env.NVD_API_KEY ?? "";
   try {
     const url = `${NVD_URL}?cveId=${encodeURIComponent(cveId)}`;
     const headers: Record<string, string> = { "User-Agent": "VEYRA/0.1" };
-    if (NVD_API_KEY) headers["apiKey"] = NVD_API_KEY;
+    if (apiKey) headers["apiKey"] = apiKey;
     const res = await fetch(url, {
       headers,
       signal: AbortSignal.timeout(20_000),
@@ -109,11 +110,9 @@ export const lookupCve: Tool = {
     if (input?.id) {
       const id = String(input.id).trim().toUpperCase();
 
-      // Try local first
       const entry = getCve(id);
       if (entry) return formatEntry(entry);
 
-      // Fall back to live NVD
       const live = await fetchFromNvd(id);
       if (live) return formatNvdLive(live);
 

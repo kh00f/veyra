@@ -7,9 +7,15 @@ import { openAICompatProvider } from "./openai-compat.ts";
 import type { CompletionRequest, CompletionResponse, Provider } from "./provider.ts";
 
 function pickProvider(): { provider: Provider; key: string } {
-  const which = (process.env.VEYRA_PROVIDER || "groq").toLowerCase();
+  const which = process.env.VEYRA_PROVIDER;
+  if (!which) {
+    throw new Error(
+      "VEYRA_PROVIDER is not set. Run `veyra setup` to configure a provider.",
+    );
+  }
+  const whichNorm = which.toLowerCase();
 
-  switch (which) {
+  switch (whichNorm) {
     case "groq": {
       const key = process.env.GROQ_API_KEY;
       if (!key) throw new Error("GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys and put it in .env");
@@ -68,11 +74,15 @@ function pickProvider(): { provider: Provider; key: string } {
     case "ollama":
       return { provider: ollamaProvider, key: "" };
     default:
-      throw new Error(`unknown VEYRA_PROVIDER "${which}" — use groq | cerebras | mistral | openrouter | openai-compat | ollama`);
+      throw new Error(
+        `unknown VEYRA_PROVIDER "${whichNorm}" — use groq | cerebras | mistral | openrouter | openai-compat | ollama`,
+      );
   }
 }
 
-export async function complete(req: CompletionRequest): Promise<{ response: CompletionResponse; provider: string }> {
+export async function complete(
+  req: CompletionRequest,
+): Promise<{ response: CompletionResponse; provider: string }> {
   const { provider, key } = pickProvider();
   const response = await provider.complete(req, key);
   return { response, provider: provider.label };

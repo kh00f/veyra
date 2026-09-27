@@ -2,8 +2,17 @@
 // VEYRA CLI. Interactive REPL by default. Non-interactive commands remain
 // available for scripting (doctor, model, skills, tools, findings, run).
 
-import "dotenv/config";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { config as loadEnv } from "dotenv";
+
+// Resolve the project root from this file's location. .env lives there,
+// not in whatever cwd the user happened to launch us from.
+const __cliDir = dirname(fileURLToPath(import.meta.url));
+const __projectRoot = join(__cliDir, "..", "..");
+const ENV_PATH = join(__projectRoot, ".env");
+
 import { runSetup } from "./setup.ts";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -66,7 +75,6 @@ async function shell() {
     const raw = (await rl.question(prompt() + " ")).trim();
     if (!raw) continue;
 
-    // ── Slash commands ──────────────────────────────────────
     if (raw.startsWith("/")) {
       const result = await handleSlash(raw, rl, currentEngagement);
       if (result === "exit") {
@@ -80,7 +88,6 @@ async function shell() {
       continue;
     }
 
-    // ── No engagement yet → ask for target, or run as a question ─
     if (!currentEngagement) {
       const target = (
         await rl.question(
@@ -118,7 +125,6 @@ async function shell() {
       currentEngagement = engId;
     }
 
-    // ── Run the task through the pentest agent ──────────────
     const eng = loadEngagement(currentEngagement);
     const beforeFindings = listFindings(eng.id).length;
 
@@ -152,7 +158,6 @@ async function shell() {
       );
       spinner.stop();
 
-      // Show the steps the agent took (skip confirm_plan noise).
       for (const s of result.steps) {
         if (s.tool === "confirm_plan") continue;
         const preview = JSON.stringify(s.input).slice(0, 90);
@@ -239,9 +244,8 @@ async function handleSlash(
     /model                show current provider and model
     /ask <question>       ask a general question (no target required)
     /clear                clear the screen
-    /exit                 quit
     /setup                run interactive provider setup
-    
+    /exit                 quit
 `);
       return null;
 
@@ -250,8 +254,6 @@ async function handleSlash(
       return "exit";
 
     case "setup": {
-      // Run setup mid-session. If it succeeds, tell the user to restart
-      // so the new provider config takes effect (env vars are loaded at boot).
       const done = await runSetup();
       if (done) {
         console.log("");
@@ -435,7 +437,6 @@ async function handleSlash(
 }
 
 async function lookupCve(query: string) {
-  // Import the tool registry and grab the registered tool by name.
   const { getTool } = await import("../tools/registry.ts");
   const tool = getTool("lookup_cve");
   if (!tool) {
@@ -486,7 +487,7 @@ function deriveHost(target: string): string | null {
 async function doctor() {
   console.log("VEYRA doctor\n");
   console.log(`node            ${process.versions.node}`);
-  console.log(`provider        ${process.env.VEYRA_PROVIDER || "groq"}`);
+  console.log(`provider        ${process.env.VEYRA_PROVIDER || "(unset)"}`);
   console.log(`model           ${currentProviderLabel()}`);
   try {
     const { response, provider } = await complete({
@@ -561,9 +562,14 @@ async function runNonInteractive(args: string[]) {
 }
 
 async function main() {
-  // Auto-setup on first run: if .env is missing and we're launching the
-  // shell (or setup explicitly), run the interactive setup flow first.
-  const needsSetup = !existsSync(".env");
+  // Load .env from the install root BEFORE anything reads process.env.
+  // Because ESM hoists imports, this is the first executable statement in
+  // the whole program.
+  loadEnv({ path: ENV_PATH });
+  // Also allow a cwd-local .env to override (useful during development).
+  loadEnv();
+
+  const needsSetup = !existsSync(ENV_PATH);
 
   if (needsSetup && (cmd === "shell" || cmd === "" || cmd === "setup")) {
     const done = await runSetup();
@@ -571,9 +577,7 @@ async function main() {
       err("setup aborted — VEYRA cannot start without configuration");
       process.exit(1);
     }
-    // .env is now written; continue into the shell.
     if (cmd === "setup") return;
-    // fall through to shell below
   }
 
   switch (cmd) {
@@ -581,8 +585,8 @@ async function main() {
     case "":
       return shell();
     case "setup": {
-      const ok = await runSetup();
-      process.exit(ok ? 0 : 1);
+      const okSetup = await runSetup();
+      process.exit(okSetup ? 0 : 1);
     }
     case "doctor":
       return doctor();
