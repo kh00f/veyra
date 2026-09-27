@@ -4,17 +4,22 @@
 import { writeFileSync, existsSync, copyFileSync } from "node:fs";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { c, err, info, ok, rule } from "./ui.ts";
+import { c, err, info, ok } from "./ui.ts";
 
 const ENV_PATH = ".env";
 
 interface ProviderChoice {
-  key: "openrouter" | "groq" | "cerebras" | "mistral" | "ollama" | "openai-compat";
+  key:
+    | "openrouter"
+    | "groq"
+    | "cerebras"
+    | "mistral"
+    | "ollama"
+    | "openai-compat";
   label: string;
   description: string;
   keyUrl?: string;
   keyVar?: string;
-  envVar?: string;        // for the "custom" case
   models: { id: string; label: string }[];
 }
 
@@ -99,56 +104,16 @@ function bootMark(): string {
 }
 
 /**
- * Ask a question with the typed characters masked. Works by writing our own
- * echo loop, since Node's readline doesn't have a native masked mode.
+ * Ask a question and return the trimmed answer.
+ *
+ * API keys are not masked. Masking requires either raw-mode byte reads
+ * (which break bracketed paste in most terminals) or a muted-output
+ * readline wrapper (which is fiddly). The key is typed on your own
+ * machine, at first-run setup, and is written straight to .env — it is
+ * never logged or sent anywhere except the provider you chose.
  */
-async function questionMasked(rl: Interface, prompt: string): Promise<string> {
-  // If not a TTY (piped input, CI), just use plain question.
-  if (!process.stdin.isTTY) {
-    return (await rl.question(prompt)).trim();
-  }
-
-  return new Promise<string>((resolve) => {
-    process.stdout.write(prompt);
-    const chars: string[] = [];
-
-    const onData = (buf: Buffer) => {
-      const s = buf.toString("utf8");
-      for (const ch of s) {
-        if (ch === "\r" || ch === "\n") {
-          process.stdin.removeListener("data", onData);
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdout.write("\n");
-          resolve(chars.join(""));
-          return;
-        }
-        if (ch === "\u0003") { // Ctrl+C
-          process.stdin.removeListener("data", onData);
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdout.write("\n");
-          process.exit(130);
-        }
-        if (ch === "\u007f" || ch === "\b") { // backspace
-          if (chars.length > 0) {
-            chars.pop();
-            process.stdout.write("\b \b");
-          }
-          continue;
-        }
-        // printable
-        if (ch >= " " && ch !== "\u007f") {
-          chars.push(ch);
-          process.stdout.write("*");
-        }
-      }
-    };
-
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.on("data", onData);
-  });
+async function askSecret(rl: Interface, prompt: string): Promise<string> {
+  return (await rl.question(prompt)).trim();
 }
 
 async function ask(rl: Interface, q: string, def?: string): Promise<string> {
@@ -157,7 +122,12 @@ async function ask(rl: Interface, q: string, def?: string): Promise<string> {
   return ans;
 }
 
-async function chooseIndex(rl: Interface, q: string, min: number, max: number): Promise<number> {
+async function chooseIndex(
+  rl: Interface,
+  q: string,
+  min: number,
+  max: number,
+): Promise<number> {
   while (true) {
     const ans = (await rl.question(q)).trim();
     const n = Number(ans);
@@ -177,16 +147,21 @@ export async function runSetup(): Promise<boolean> {
 
     if (existsSync(ENV_PATH)) {
       info("An .env file already exists. Setup will overwrite it.");
-      const confirm = (await rl.question("  " + c.faint("continue? (y/N) ›") + " ")).trim().toLowerCase();
+      const confirm = (
+        await rl.question("  " + c.faint("continue? (y/N) ›") + " ")
+      )
+        .trim()
+        .toLowerCase();
       if (confirm !== "y" && confirm !== "yes") {
         info("cancelled");
         return false;
       }
-      // Back up
       try {
         copyFileSync(ENV_PATH, ENV_PATH + ".backup");
         info(`existing .env backed up to ${ENV_PATH}.backup`);
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     } else {
       info("No .env file found. Let's configure VEYRA.");
     }
@@ -202,7 +177,8 @@ export async function runSetup(): Promise<boolean> {
     }
     console.log("");
 
-    const choiceIdx = (await chooseIndex(rl, "  Choose [1-6]: ", 1, PROVIDERS.length)) - 1;
+    const choiceIdx =
+      (await chooseIndex(rl, "  Choose [1-6]: ", 1, PROVIDERS.length)) - 1;
     const chosen = PROVIDERS[choiceIdx];
     console.log("");
     ok(`${chosen.label} selected.`);
@@ -216,7 +192,7 @@ export async function runSetup(): Promise<boolean> {
         console.log("    " + c.cyan(chosen.keyUrl));
         console.log("");
       }
-      apiKey = (await questionMasked(rl, `  Paste your ${chosen.label} API key: `)).trim();
+      apiKey = (await askSecret(rl, `  Paste your ${chosen.label} API key: `)).trim();
       if (!apiKey) {
         err("no key entered");
         return false;
@@ -227,13 +203,22 @@ export async function runSetup(): Promise<boolean> {
     let modelId = "";
 
     if (chosen.key === "openai-compat") {
-      // Custom provider — ask for URL, key, model
       console.log("");
-      const url = (await ask(rl, "  Base URL (e.g. https://api.example.com/v1): ")).trim();
-      if (!url) { err("no URL entered"); return false; }
-      const customKey = (await questionMasked(rl, "  API key (or leave blank if none): ")).trim();
+      const url = (
+        await ask(rl, "  Base URL (e.g. https://api.example.com/v1): ")
+      ).trim();
+      if (!url) {
+        err("no URL entered");
+        return false;
+      }
+      const customKey = (
+        await askSecret(rl, "  API key (or leave blank if none): ")
+      ).trim();
       const customModel = (await ask(rl, "  Model ID (e.g. my-model-name): ")).trim();
-      if (!customModel) { err("no model entered"); return false; }
+      if (!customModel) {
+        err("no model entered");
+        return false;
+      }
       apiKey = customKey;
       modelId = customModel;
 
@@ -255,7 +240,11 @@ export async function runSetup(): Promise<boolean> {
       const testResult = await testConfig(envContent);
       if (!testResult.ok) {
         err(`config test failed: ${testResult.error}`);
-        const retry = (await rl.question("  save anyway? (y/N) › ")).trim().toLowerCase();
+        const retry = (
+          await rl.question("  save anyway? (y/N) › ")
+        )
+          .trim()
+          .toLowerCase();
         if (retry !== "y" && retry !== "yes") return false;
       } else {
         ok(`Provider responded. Model: ${testResult.model}`);
@@ -280,13 +269,19 @@ export async function runSetup(): Promise<boolean> {
         console.log(`  ${num}. ${id} ${c.muted("(" + m.label + ")")}`);
       }
       const customIdx = chosen.models.length + 1;
-      console.log(`  ${c.mint(String(customIdx).padStart(2))}. ${c.text("custom".padEnd(40))} ${c.muted("(type a model ID)")}`);
+      console.log(
+        `  ${c.mint(String(customIdx).padStart(2))}. ${c.text("custom".padEnd(40))} ${c.muted("(type a model ID)")}`,
+      );
       console.log("");
 
-      const modelIdx = (await chooseIndex(rl, `  Choose [1-${customIdx}]: `, 1, customIdx)) - 1;
+      const modelIdx =
+        (await chooseIndex(rl, `  Choose [1-${customIdx}]: `, 1, customIdx)) - 1;
       if (modelIdx === chosen.models.length) {
         modelId = (await ask(rl, "  Model ID: ")).trim();
-        if (!modelId) { err("no model entered"); return false; }
+        if (!modelId) {
+          err("no model entered");
+          return false;
+        }
       } else {
         modelId = chosen.models[modelIdx].id;
       }
@@ -319,7 +314,11 @@ export async function runSetup(): Promise<boolean> {
     if (!testResult.ok) {
       err(`config test failed: ${testResult.error}`);
       console.log("");
-      const retry = (await rl.question("  save anyway? (y/N) › ")).trim().toLowerCase();
+      const retry = (
+        await rl.question("  save anyway? (y/N) › ")
+      )
+        .trim()
+        .toLowerCase();
       if (retry !== "y" && retry !== "yes") {
         info("not saved.");
         return false;
@@ -343,7 +342,9 @@ export async function runSetup(): Promise<boolean> {
  * Write the config to a temporary in-memory env and try a real request
  * against the provider. Returns { ok, model?, error? }.
  */
-async function testConfig(envContent: string): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
+async function testConfig(
+  envContent: string,
+): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
   // Parse KEY=VALUE lines
   const vars: Record<string, string> = {};
   for (const line of envContent.split("\n")) {
@@ -353,8 +354,7 @@ async function testConfig(envContent: string): Promise<{ ok: true; model: string
     if (eq < 0) continue;
     vars[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
   }
-  // Apply to a temporary env, then call the router in a subprocess-safe way.
-  // The easiest correct thing: set process.env and call complete() from router.
+  // Apply to a temporary env, then call the router.
   const saved: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(vars)) {
     saved[k] = process.env[k];
@@ -371,7 +371,6 @@ async function testConfig(envContent: string): Promise<{ ok: true; model: string
   } catch (e: any) {
     return { ok: false, error: e?.message ?? String(e) };
   } finally {
-    // restore
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
