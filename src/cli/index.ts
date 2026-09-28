@@ -54,6 +54,9 @@ import "../tools/update-finding.ts";
 import "../tools/confirm-plan.ts";
 import "../tools/web-fetch.ts";
 import "../tools/lookup-cve.ts";
+import "../tools/ransomlook-hot.ts";
+import "../tools/ransomlook-search.ts";
+import "../tools/ransomlook-groups.ts";
 
 const VERSION = "0.1.0";
 const argv = process.argv.slice(2);
@@ -246,6 +249,7 @@ async function handleSlash(
     /clear                clear the screen
     /setup                run interactive provider setup
     /exit                 quit
+    /ransomlook <search|hot|groups> [arg]   check ransomlook.io
 `);
       return null;
 
@@ -377,6 +381,18 @@ async function handleSlash(
       return null;
     }
 
+
+        case "ransomlook":
+    case "darkweb": {
+      if (!arg) {
+        err("usage: /ransomlook <search|hot|groups> [arg]");
+        return null;
+      }
+      await ransomlookCommand(arg);
+      return null;
+    }
+
+
     case "skills": {
       const all = loadSkills();
       const byCat = new Map<string, typeof all>();
@@ -402,6 +418,9 @@ async function handleSlash(
         "dns_lookup",
         "web_fetch",
         "lookup_cve",
+        "ransomlook_hot",
+        "ransomlook_search",
+        "ransomlook_groups",
         "create_finding",
         "update_finding",
         "confirm_plan",
@@ -465,6 +484,43 @@ async function lookupCve(query: string) {
   console.log(indent(output));
   console.log("");
 }
+
+async function ransomlookCommand(arg: string) {
+  const { getTool } = await import("../tools/registry.ts");
+  const [sub, ...rest] = arg.split(/\s+/);
+  const query = rest.join(" ").trim();
+  const fakeCtx = {
+    engagementId: "cli",
+    scopeCheck: () => ({ allowed: true, reason: "" }),
+    audit: () => {},
+  };
+  let tool;
+  let input: any;
+  if (sub === "hot") {
+    tool = getTool("ransomlook_hot");
+    input = query ? { days: Number(query) } : {};
+  } else if (sub === "groups") {
+    tool = getTool("ransomlook_groups");
+    input = query ? { filter: query } : {};
+  } else if (sub === "search") {
+    tool = getTool("ransomlook_search");
+    input = { query };
+  } else {
+    // shorthand: /ransomlook att.com == /ransomlook search att.com
+    tool = getTool("ransomlook_search");
+    input = { query: arg.trim() };
+  }
+  if (!tool) {
+    err("ransomlook tool not registered");
+    return;
+  }
+  const output = await tool.run(input, fakeCtx as any);
+  console.log("");
+  console.log(indent(output));
+  console.log("");
+}
+
+
 
 function deriveHost(target: string): string | null {
   try {
